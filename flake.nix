@@ -10,7 +10,15 @@
     nixpkgs,
   }: let
     configuration = {pkgs, ...}: {
-      imports = [typhon.nixosModules.default];
+      imports = [
+        typhon.nixosModules.default
+        "${nixpkgs}/nixos/modules/virtualisation/qemu-vm.nix"
+      ];
+
+      virtualisation = {
+        diskSize = 2048;
+        memorySize = 2048;
+      };
 
       nix = {
         package = pkgs.nixVersions.nix_2_18;
@@ -22,22 +30,38 @@
         passwordFile = "${pkgs.writeText "password" "password"}";
       };
 
-      services.nginx = {
-        enable = true;
-        virtualHosts."example.com" = {
-          locations."/" = {
-            proxyPass = "http://localhost:3000";
-            recommendedProxySettings = true;
-          };
-        };
-      };
-
       users.users.root = {
         initialPassword = "root";
         packages = [
-          (pkgs.writeShellScriptBin "stress" ''
-            curl -H 'password: password' --json '{"flake":true,"url":"github:typhon-ci/stress"}' http://localhost/api/projects/stress/create
-          '')
+          (pkgs.writeShellApplication {
+            name = "stress";
+            runtimeInputs = [pkgs.jq];
+            text = let
+              curl = "curl -sf -H 'password: password'";
+            in ''
+              api="http://localhost:3000/api"
+
+              ${curl} --json '{"flake": true, "url": "github:typhon-ci/stress"}' "$api/projects/stress/create"
+
+              ${curl} -X POST "$api/projects/stress/refresh"
+              while [ "$(${curl} "$api/projects/stress" | jq '.last_refresh.Success')" == "null" ]
+              do
+                  sleep 1
+              done
+
+              ${curl} -X POST "$api/projects/stress/update_jobsets"
+              while [ "$(${curl} "$api/projects/stress" | jq '.jobsets | length')" == "0" ]
+              do
+                  sleep 1
+              done
+
+              jobsets=$(${curl} "$api/projects/stress" | jq -r '.jobsets | .[] | @uri')
+              for jobset in $jobsets
+              do
+                  ${curl} -X POST "$api/projects/stress/jobsets/$jobset/evaluate"
+              done
+            '';
+          })
         ];
       };
     };
