@@ -27,7 +27,9 @@
 
       services.typhon = {
         enable = true;
-        passwordFile = "${pkgs.writeText "password" "password"}";
+        hashedPasswordFile = builtins.toString (pkgs.runCommand "password" {} ''
+          echo -n "password" | ${pkgs.libargon2}/bin/argon2 "Guérande" -id -e > $out
+        '');
       };
 
       users.users.root = {
@@ -72,8 +74,8 @@
     packages.${system}.default = pkgs.writeShellScriptBin "run" ''
       QEMU_KERNEL_PARAMS=console=ttyS0 ${vm}/bin/run-nixos-vm -nographic; reset
     '';
-    typhonProject = typhon.lib.mkProject {
-      actions.jobsets = typhon.lib.mkGitJobsets {
+    typhonProject = typhon.lib.builders.mkProject {
+      actions.jobsets = typhon.lib.git.mkJobsets {
         url = "https://github.com/typhon-ci/typhon";
       };
     };
